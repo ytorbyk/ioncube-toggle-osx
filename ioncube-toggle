@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+app="$(basename "$0")"
+command="$1"
+options="$2"
+
+php_version_dot=$(php -r "\$v=explode('.', phpversion() ); echo implode('.', array_splice(\$v, 0, -1));")
+php_version="${php_version_dot//./}"
+
+ioncube_conf_path="$(brew --prefix)/etc/php/$php_version_dot/conf.d"
+ioncube_conf_file="ext-ioncubeloader.ini"
+ioncube_conf=$ioncube_conf_path/$ioncube_conf_file
+function keg_exists() { brew list php"${php_version}"-ioncubeloader 2> /dev/null > /dev/null; }
+
+if keg_exists; then
+    if [ ! -f "$ioncube_conf" ] && [ ! -f "$ioncube_conf.disabled" ]; then
+        echo ""
+        echo "The ini file for ionCube was not found at '$ioncube_conf_path'"
+        echo "Did you install ionCube via Homebrew?"
+        echo "For more informations: http://github.com/ytorbyk/ioncube-toggle-osx/blob/master/README.md"
+        echo ""
+
+        exit 1
+    else
+        STATUS="enabled"
+        IS_PHP_FPM=false
+        SERVER_NAME="apache"
+
+        if [ -f "$ioncube_conf" ] && [ -f "$ioncube_conf.disabled" ]; then
+            echo ""
+            echo "Detected both enabled and disabled ionCube ini files. Deleting the disabled one."
+            echo ""
+
+            rm -rf "$ioncube_conf.disabled"
+            STATUS="enabled"
+        elif [ -f "$ioncube_conf.disabled" ]; then
+            STATUS="disabled"
+        fi
+
+        if [ $# -ge 1 ] && [ "$command" == "on" ] || [ "$command" == "off" ]; then
+            if [ "$command" == "on" ]; then
+                mv "$ioncube_conf.disabled" "$ioncube_conf" 2> /dev/null
+                STATUS="enabled"
+            elif [ "$command" == "off" ]; then
+                mv "$ioncube_conf" "$ioncube_conf.disabled" 2> /dev/null
+                STATUS="disabled"
+            fi
+
+            if [ -f ~/Library/LaunchAgents/homebrew.mxcl.php"${php_version}".plist ]; then
+                IS_PHP_FPM=true
+                SERVER_NAME="php-fpm"
+            fi
+
+            if [ "$options" == '--no-server-restart' ]; then
+                echo ""
+                echo "ionCube has been $STATUS. Will not restart $SERVER_NAME"
+            else
+                if [ "$IS_PHP_FPM" == true ]; then
+                    echo ""
+                    echo "ionCube has been $STATUS, restarting $SERVER_NAME"
+
+                    brew services restart php"${php_version}"
+                else
+                    echo ""
+                    echo "ionCube has been $STATUS, restarting $SERVER_NAME (it might ask for your password)"
+
+                    sudo pkill -9 httpd
+                    sudo apachectl -k restart > /dev/null 2>&1
+                fi
+            fi
+        else
+            echo ""
+            echo "Usage: ${app} <on | off> [--no-server-restart]"
+        fi
+
+        echo ""
+        echo "You are running PHP v$php_version_dot with ionCube $STATUS"
+        echo ""
+    fi
+else
+    echo ""
+    echo "ionCube for PHP $php_version_dot was never installed or not installed via Brew."
+    echo "For more informations: http://github.com/ytorbyk/ioncube-toggle-osx/blob/master/README.md"
+    echo ""
+    exit 1
+fi
